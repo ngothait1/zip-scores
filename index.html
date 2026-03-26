@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zip Code Lead Scoring</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="zip_data.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAFAF9; color: #1C1917; padding: 24px; }
+  h1 { font-size: 22px; margin-bottom: 8px; text-align: center; }
+  .subtitle { text-align: center; font-size: 13px; color: #A8A29E; margin-bottom: 20px; }
+
+  .controls { max-width: 1100px; margin: 0 auto 20px; background: #fff; border: 1px solid #E7E5E4; border-radius: 8px; padding: 20px; display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+
+  .formula-section { flex: 1; min-width: 300px; }
+  .formula-toggle { display: flex; gap: 16px; margin-bottom: 12px; }
+  .formula-toggle label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #57534E; cursor: pointer; padding: 6px 12px; border: 1px solid #E7E5E4; border-radius: 6px; }
+  .formula-toggle input:checked + span { color: #0D7377; }
+  .formula-toggle label:has(input:checked) { border-color: #0D7377; background: #0D73770A; }
+  .formula-toggle input { accent-color: #0D7377; }
+  .formula-desc { font-size: 12px; color: #78716C; line-height: 1.5; margin-bottom: 10px; }
+  .formula-box { font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; background: #F5F5F4; padding: 8px 14px; border-radius: 6px; color: #1C1917; }
+
+  .slider-group { min-width: 200px; }
+  .slider-group label { font-size: 13px; font-weight: 600; color: #57534E; display: block; margin-bottom: 4px; }
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .slider-row input[type=range] { width: 140px; accent-color: #0D7377; }
+  .slider-row .val { font-size: 16px; font-weight: 700; color: #0D7377; min-width: 40px; text-align: right; }
+
+  .right-controls { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; margin-left: auto; }
+  .stats-row { display: flex; gap: 12px; }
+  .stat { background: #F5F5F4; border-radius: 6px; padding: 8px 14px; text-align: center; }
+  .stat .num { font-size: 18px; font-weight: 700; color: #0D7377; }
+  .stat .lbl { font-size: 10px; color: #A8A29E; }
+  .dl-btn { background: #0D7377; color: #fff; border: none; border-radius: 6px; padding: 10px 20px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .dl-btn:hover { background: #0B6264; }
+
+  .table-wrap { max-width: 1100px; margin: 0 auto; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #E7E5E4; border-radius: 8px; overflow: hidden; }
+  th { background: #F5F5F4; text-align: left; padding: 10px 14px; font-size: 12px; color: #57534E; font-weight: 600; white-space: nowrap; }
+  td { padding: 8px 14px; font-size: 13px; border-top: 1px solid #F5F5F4; white-space: nowrap; }
+  tr:hover td { background: #FAFAF9; }
+  .rank { color: #A8A29E; font-weight: 600; }
+  th.right, td.right { text-align: right; }
+  .score { font-weight: 700; }
+  .bar-cell { position: relative; min-width: 110px; }
+  .bar { position: absolute; left: 0; top: 0; bottom: 0; background: #0D737718; border-radius: 0 4px 4px 0; }
+  .bar-text { position: relative; z-index: 1; }
+  .money { color: #10B981; font-weight: 500; }
+  .price-input { width: 90px; border: 1px solid #E7E5E4; border-radius: 4px; padding: 4px 8px; font-size: 13px; font-family: inherit; text-align: right; color: #E8621C; font-weight: 600; }
+  .price-input:focus { outline: none; border-color: #0D7377; box-shadow: 0 0 0 2px #0D73770F; }
+  .price-input::placeholder { color: #D6D3D1; font-weight: 400; }
+</style>
+</head>
+<body>
+
+<h1>Zip Code Lead Scoring - LA Permits</h1>
+<p class="subtitle">45,157 permits submitted in the last 12 months across 122 LA zip codes. Set a price on any row - all others adjust proportionally.</p>
+
+<div class="controls">
+  <div class="formula-section">
+    <div class="formula-toggle">
+      <label><input type="radio" name="mode" value="product" checked><span>Product</span></label>
+      <label><input type="radio" name="mode" value="sum"><span>Weighted Sum</span></label>
+      <label><input type="radio" name="mode" value="sqrt"><span>Square Root</span></label>
+    </div>
+    <div id="formulaDesc" class="formula-desc"></div>
+    <div id="formulaBox" class="formula-box"></div>
+  </div>
+
+  <div id="sqrtSection" style="display:none">
+    <div class="slider-group">
+      <label>Price per sqrt(permit)</label>
+      <div class="slider-row">
+        <span style="font-size:13px;color:#57534E;">$</span>
+        <input type="number" id="sqrtMultiplier" value="13" min="1" max="999" style="width:60px;border:1px solid #E7E5E4;border-radius:4px;padding:4px 8px;font-size:14px;font-weight:600;color:#0D7377;text-align:right;">
+      </div>
+    </div>
+  </div>
+
+  <div id="sliderSection" style="display:none">
+    <div class="slider-group">
+      <label>Number of Permits Weight</label>
+      <div class="slider-row">
+        <input type="range" id="volW" min="0" max="100" value="40">
+        <span class="val" id="volVal">40%</span>
+      </div>
+    </div>
+    <div class="slider-group" style="margin-top:10px">
+      <label>Median Home Value Weight</label>
+      <div class="slider-row">
+        <input type="range" id="valW" min="0" max="100" value="60">
+        <span class="val" id="valVal">60%</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-controls">
+    <div class="stats-row">
+      <div class="stat"><div class="num">122</div><div class="lbl">Zip Codes</div></div>
+      <div class="stat"><div class="num">45,157</div><div class="lbl">Permits</div></div>
+    </div>
+    <button class="dl-btn" onclick="downloadExcel()">Download Excel</button>
+  </div>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Zip</th>
+      <th>Neighborhood</th>
+      <th class="right">Permits</th>
+      <th class="right">Median Home Value</th>
+      <th>Score</th>
+      <th>Price/mo</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+</div>
+
+<script>
+var DATA = ZIP_DATA;
+var maxP = Math.max.apply(null, DATA.map(function(d){ return d.p; }));
+var maxV = Math.max.apply(null, DATA.map(function(d){ return d.v; }));
+
+var volSlider = document.getElementById('volW');
+var valSlider = document.getElementById('valW');
+var volVal = document.getElementById('volVal');
+var valVal = document.getElementById('valVal');
+var formulaDesc = document.getElementById('formulaDesc');
+var formulaBox = document.getElementById('formulaBox');
+var sliderSection = document.getElementById('sliderSection');
+var sqrtSection = document.getElementById('sqrtSection');
+var sqrtMultiplier = document.getElementById('sqrtMultiplier');
+
+var lastScored = [];
+var anchorZip = null;
+var anchorPrice = null;
+var mode = 'product';
+
+document.querySelectorAll('input[name="mode"]').forEach(function(r) {
+  r.addEventListener('change', function() {
+    mode = this.value;
+    sliderSection.style.display = mode === 'sum' ? 'block' : 'none';
+    sqrtSection.style.display = mode === 'sqrt' ? 'block' : 'none';
+    render();
+  });
+});
+
+sqrtMultiplier.addEventListener('input', render);
+
+function calcScores() {
+  var wVol = parseInt(volSlider.value);
+  var wVal = 100 - wVol;
+  valSlider.value = wVal;
+  volVal.textContent = wVol + '%';
+  valVal.textContent = wVal + '%';
+
+  var mult = parseInt(sqrtMultiplier.value) || 13;
+
+  if (mode === 'product') {
+    formulaDesc.textContent = 'Multiplies both dimensions. A zip must score high on both permits AND home value to rank well. Zero on either axis = zero score.';
+    formulaBox.textContent = 'Score = Permits in Zip x Median Home Value';
+  } else if (mode === 'sum') {
+    formulaDesc.textContent = 'Weighted blend of both dimensions. A zip can compensate weakness in one with strength in the other. Adjust the sliders to control the balance.';
+    formulaBox.textContent = 'Score = (Permits in Zip x ' + wVol + '%) + (Median Home Value x ' + wVal + '%)';
+  } else {
+    formulaDesc.textContent = 'Price scales with the square root of permit volume. More permits = higher price, but with diminishing returns. Ignores home value.';
+    formulaBox.textContent = 'Price = $' + mult + ' x sqrt(Permits in Zip)';
+  }
+
+  lastScored = DATA.map(function(d) {
+    var volNorm = (d.p / maxP) * 100;
+    var valNorm = (d.v / maxV) * 100;
+    var sc;
+    if (mode === 'product') {
+      sc = (volNorm / 100) * (valNorm / 100) * 100;
+    } else if (mode === 'sum') {
+      sc = (volNorm * wVol / 100) + (valNorm * wVal / 100);
+    } else {
+      sc = mult * Math.sqrt(d.p);
+    }
+    return { z: d.z, p: d.p, v: d.v, n: d.n, score: Math.round(sc * 10) / 10, price: null };
+  });
+  lastScored.sort(function(a, b) { return b.score - a.score; });
+
+  if (mode === 'sqrt') {
+    // In sqrt mode, score IS the price
+    lastScored.forEach(function(d) {
+      d.price = Math.round(d.score);
+    });
+  } else if (anchorZip && anchorPrice) {
+    var anchorRow = null;
+    for (var i = 0; i < lastScored.length; i++) {
+      if (lastScored[i].z === anchorZip) { anchorRow = lastScored[i]; break; }
+    }
+    if (anchorRow && anchorRow.score > 0) {
+      var pricePerPoint = anchorPrice / anchorRow.score;
+      lastScored.forEach(function(d) {
+        d.price = Math.round(d.score * pricePerPoint);
+      });
+    }
+  }
+
+  return lastScored;
+}
+
+function onPriceInput(zip, value) {
+  var num = parseInt(value.replace(/[^0-9]/g, ''));
+  if (num > 0) {
+    if (mode === 'sqrt') {
+      // Back-calculate multiplier from the entered price
+      var zipData = DATA.find(function(d) { return d.z === zip; });
+      if (zipData && zipData.p > 0) {
+        var newMult = num / Math.sqrt(zipData.p);
+        sqrtMultiplier.value = Math.round(newMult);
+      }
+    } else {
+      anchorZip = zip;
+      anchorPrice = num;
+    }
+  } else {
+    anchorZip = null;
+    anchorPrice = null;
+  }
+  render();
+}
+
+function render() {
+  var scored = calcScores();
+  var maxScore = scored[0] ? scored[0].score : 1;
+
+  document.getElementById('tbody').innerHTML = scored.map(function(d, i) {
+    var priceVal = '';
+    var placeholder = 'placeholder="$"';
+    if (d.price) {
+      priceVal = 'value="$' + d.price.toLocaleString() + '"';
+      placeholder = '';
+    } else if (mode !== 'sqrt' && d.z === anchorZip) {
+      priceVal = 'value="$' + anchorPrice.toLocaleString() + '"';
+      placeholder = '';
+    }
+
+    return '<tr>' +
+      '<td class="rank">' + (i + 1) + '</td>' +
+      '<td><strong>' + d.z + '</strong></td>' +
+      '<td>' + d.n + '</td>' +
+      '<td class="right">' + d.p.toLocaleString() + '</td>' +
+      '<td class="right money">$' + d.v.toLocaleString() + '</td>' +
+      '<td class="bar-cell">' +
+        '<div class="bar" style="width:' + (d.score / maxScore * 100).toFixed(1) + '%"></div>' +
+        '<span class="bar-text score">' + d.score + '</span>' +
+      '</td>' +
+      '<td><input class="price-input" type="text" ' + priceVal + ' ' + placeholder + ' onchange="onPriceInput(\'' + d.z + '\', this.value)" /></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function downloadExcel() {
+  var rows = lastScored.map(function(d, i) {
+    return {
+      'Rank': i + 1,
+      'Zip Code': d.z,
+      'Neighborhood': d.n,
+      'Permits (12mo)': d.p,
+      'Median Home Value': d.v,
+      'Score': d.score,
+      'Price/mo': d.price || ''
+    };
+  });
+  var ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [
+    {wch: 6}, {wch: 10}, {wch: 28}, {wch: 14},
+    {wch: 20}, {wch: 8}, {wch: 12}
+  ];
+
+  // Format numbers: $ for home value and price, comma for permits
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  for (var r = 1; r <= range.e.r; r++) {
+    var hvCell = ws[XLSX.utils.encode_cell({r: r, c: 4})];
+    if (hvCell) hvCell.z = '$#,##0';
+    var prCell = ws[XLSX.utils.encode_cell({r: r, c: 6})];
+    if (prCell && prCell.v) prCell.z = '$#,##0';
+    var pmCell = ws[XLSX.utils.encode_cell({r: r, c: 3})];
+    if (pmCell) pmCell.z = '#,##0';
+  }
+
+  // Bold header row
+  for (var c = 0; c <= range.e.c; c++) {
+    var cell = ws[XLSX.utils.encode_cell({r: 0, c: c})];
+    if (cell) {
+      cell.s = { font: { bold: true }, fill: { fgColor: { rgb: 'F5F5F4' } }, alignment: { horizontal: 'center' } };
+    }
+  }
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Zip Scores');
+  XLSX.writeFile(wb, 'zip_lead_scores.xlsx');
+}
+
+volSlider.addEventListener('input', render);
+valSlider.addEventListener('input', function() {
+  volSlider.value = 100 - parseInt(valSlider.value);
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
